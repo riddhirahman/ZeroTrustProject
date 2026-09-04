@@ -5,11 +5,11 @@ const jwt = require("jsonwebtoken");
 const router = express.Router();
 
 // Temporary users for development.
-// We will replace this with MongoDB later.
+// replace this with MongoDB later.
 const users = [
     {
         id: 1,
-        username: "alice",
+        username: "Riddhi",
         password: bcrypt.hashSync("user123", 10),
         role: "USER"
     },
