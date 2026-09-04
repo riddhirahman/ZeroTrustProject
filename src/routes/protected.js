@@ -10,6 +10,15 @@ router.get("/profile", pep, (req, res) => {
     });
 });
 
+router.post("/profile", pep, (req, res) => {
+
+    res.json({
+        message: "POST access granted to protected profile",
+        user: req.user
+    });
+
+});
+
 router.get("/admin", pep, (req, res) => {
     res.json({
         message: "Access granted to admin resource",

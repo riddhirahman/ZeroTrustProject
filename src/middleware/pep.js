@@ -38,13 +38,22 @@ function pep(req, res, next) {
 
         // 2. Ask PDP for authorization decision
         const resource = req.originalUrl.split("?")[0];
+        const action = req.method;
 
         const policyResult = evaluatePolicy(
             decoded,
-            resource
+            resource,
+            action
         );
 
-        console.log("[PDP]", policyResult);
+        console.log("[PDP]", {
+            user: decoded.username,
+            role: decoded.role,
+            action: action,
+            resource: resource,
+            decision: policyResult.decision,
+            reason: policyResult.reason
+        });
 
         // 3. PEP enforces PDP decision
         if (policyResult.decision === "DENY") {

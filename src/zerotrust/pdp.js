@@ -1,40 +1,55 @@
 // Policy Decision Point (PDP)
 //
 // The PDP decides whether an authenticated user
-// is allowed to access a requested resource.
+// is allowed to perform an action on a requested resource.
 
-function evaluatePolicy(user, resource) {
+function evaluatePolicy(user, resource, action) {
 
     // USER permissions
     if (user.role === "USER") {
-        if (resource === "/api/profile") {
+
+        if (
+            resource === "/api/profile" &&
+            action === "GET"
+        ) {
             return {
                 decision: "ALLOW",
-                reason: "USER is permitted to access profile"
+                reason: "USER is permitted to perform GET on profile"
             };
         }
 
         return {
             decision: "DENY",
-            reason: "USER does not have permission for this resource"
+            reason: "USER is not permitted to perform this action on this resource"
         };
     }
 
     // ADMIN permissions
     if (user.role === "ADMIN") {
+
         if (
-            resource === "/api/profile" ||
-            resource === "/api/admin"
+            resource === "/api/profile" &&
+            action === "GET"
         ) {
             return {
                 decision: "ALLOW",
-                reason: "ADMIN is permitted to access this resource"
+                reason: "ADMIN is permitted to perform GET on profile"
+            };
+        }
+
+        if (
+            resource === "/api/admin" &&
+            action === "GET"
+        ) {
+            return {
+                decision: "ALLOW",
+                reason: "ADMIN is permitted to perform GET on admin resource"
             };
         }
 
         return {
             decision: "DENY",
-            reason: "ADMIN does not have permission for this resource"
+            reason: "ADMIN is not permitted to perform this action on this resource"
         };
     }
 
