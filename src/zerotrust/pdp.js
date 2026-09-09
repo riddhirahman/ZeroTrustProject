@@ -1,62 +1,70 @@
 // Policy Decision Point (PDP)
 //
 // The PDP decides whether an authenticated user
-// is allowed to perform an action on a requested resource.
+// is allowed to perform an action on a resource.
+
+// Centralized authorization policy
+const policies = {
+    USER: {
+        "/api/profile": ["GET"]
+    },
+
+    ADMIN: {
+        "/api/profile": ["GET", "POST"],
+        "/api/admin": ["GET"]
+    }
+};
 
 function evaluatePolicy(user, resource, action) {
 
-    // USER permissions
-    if (user.role === "USER") {
-
-        if (
-            resource === "/api/profile" &&
-            action === "GET"
-        ) {
-            return {
-                decision: "ALLOW",
-                reason: "USER is permitted to perform GET on profile"
-            };
-        }
-
-        return {
-            decision: "DENY",
-            reason: "USER is not permitted to perform this action on this resource"
-        };
-    }
-
-    // ADMIN permissions
-    if (user.role === "ADMIN") {
-
-        if (
-            resource === "/api/profile" &&
-            action === "GET"
-        ) {
-            return {
-                decision: "ALLOW",
-                reason: "ADMIN is permitted to perform GET on profile"
-            };
-        }
-
-        if (
-            resource === "/api/admin" &&
-            action === "GET"
-        ) {
-            return {
-                decision: "ALLOW",
-                reason: "ADMIN is permitted to perform GET on admin resource"
-            };
-        }
-
-        return {
-            decision: "DENY",
-            reason: "ADMIN is not permitted to perform this action on this resource"
-        };
-    }
+    const rolePolicies = policies[user.role];
 
     // Unknown role
+    if (!rolePolicies) {
+        return {
+            user: user.username,
+            role: user.role,
+            action,
+            resource,
+            decision: "DENY",
+            reason: "Unknown user role"
+        };
+    }
+
+    const allowedActions = rolePolicies[resource];
+
+    // Role has no policy for this resource
+    if (!allowedActions) {
+        return {
+            user: user.username,
+            role: user.role,
+            action,
+            resource,
+            decision: "DENY",
+            reason: `${user.role} is not permitted to access ${resource}`
+        };
+    }
+
+    // Check whether requested action is allowed
+    if (!allowedActions.includes(action)) {
+        return {
+            user: user.username,
+            role: user.role,
+            action,
+            resource,
+            decision: "DENY",
+            reason: `${user.role} is not permitted to perform ${action} on ${resource}`
+        };
+    }
+
+    // Policy matched
     return {
-        decision: "DENY",
-        reason: "Unknown user role"
+        user: user.username,
+        role: user.role,
+        action,
+        resource,
+        decision: "ALLOW",
+        reason: `${user.role} is permitted to perform ${action} on ${resource}`
     };
 }
 
