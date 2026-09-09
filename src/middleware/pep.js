@@ -1,3 +1,4 @@
+const { auditLog } = require("../zerotrust/audit"); //Require the auditLog function from the audit.js file
 const jwt = require("jsonwebtoken");
 const { evaluatePolicy } = require("../zerotrust/pdp");
 
@@ -46,14 +47,18 @@ function pep(req, res, next) {
             resource
         );
 
-        console.log("[PDP]", {
-            user: decoded.username,
-            role: decoded.role,
-            action: action,
-            resource: resource,
-            decision: policyResult.decision,
-            reason: policyResult.reason
-        });
+        console.log("[PDP]", policyResult);
+
+        // 3. Record authorization decision
+        auditLog(policyResult);
+
+        // 4. PEP enforces PDP decision
+        if (policyResult.decision === "DENY") {
+            return res.status(403).json(policyResult);
+        }
+
+        // 5. Request is allowed
+        next();
 
         // 3. PEP enforces PDP decision
         if (policyResult.decision === "DENY") {
