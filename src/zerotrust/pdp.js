@@ -6,16 +6,16 @@
 // Centralized authorization policy
 const policies = {
     USER: {
-        "/api/profile": ["GET"]
+        "/api/profile": ["GET", "POST"]
     },
 
     ADMIN: {
-        "/api/profile": ["GET", "POST"],
+        "/api/profile": ["GET", "POST", "DELETE"],
         "/api/admin": ["GET"]
     }
 };
 
-function evaluatePolicy(user, resource, action) {
+function evaluatePolicy(user, action, resource) {
 
     const rolePolicies = policies[user.role];
 
@@ -31,9 +31,9 @@ function evaluatePolicy(user, resource, action) {
         };
     }
 
+    // Check whether the role has access to the resource
     const allowedActions = rolePolicies[resource];
 
-    // Role has no policy for this resource
     if (!allowedActions) {
         return {
             user: user.username,
@@ -45,7 +45,7 @@ function evaluatePolicy(user, resource, action) {
         };
     }
 
-    // Check whether requested action is allowed
+    // Check whether the requested action is allowed
     if (!allowedActions.includes(action)) {
         return {
             user: user.username,

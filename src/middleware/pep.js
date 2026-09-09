@@ -42,8 +42,8 @@ function pep(req, res, next) {
 
         const policyResult = evaluatePolicy(
             decoded,
-            resource,
-            action
+            action,
+            resource
         );
 
         console.log("[PDP]", {
