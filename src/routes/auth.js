@@ -22,7 +22,13 @@ const users = [
 ];
 
 router.post("/login", async (req, res) => {
-    const { username, password } = req.body;
+    const { username, password } = req.body || {};
+
+    if (!username || !password) {
+        return res.status(400).json({
+            message: "Username and password are required"
+        });
+    }
 
     const user = users.find(u => u.username === username);
 
