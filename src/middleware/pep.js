@@ -1,4 +1,5 @@
 const { auditLog } = require("../zerotrust/audit"); //Require the auditLog function from the audit.js file
+const { monitorAuthorizationDecision } = require("../zerotrust/security-monitor");
 const jwt = require("jsonwebtoken");
 const { evaluatePolicy } = require("../zerotrust/pdp");
 
@@ -52,21 +53,19 @@ function pep(req, res, next) {
         // 3. Record authorization decision
         auditLog(policyResult);
 
-        // 4. PEP enforces PDP decision
+        // 4. Detect repeated denied attempts without changing the PDP decision.
+        const securityEvent = monitorAuthorizationDecision(policyResult);
+        if (securityEvent) {
+            console.warn("[Security Monitor]", securityEvent);
+        }
+
+        // 5. PEP enforces PDP decision
         if (policyResult.decision === "DENY") {
             return res.status(403).json(policyResult);
         }
 
-        // 5. Request is allowed
-        next();
-
-        // 3. PEP enforces PDP decision
-        if (policyResult.decision === "DENY") {
-            return res.status(403).json(policyResult);
-        }
-
-        // 4. Request is allowed
-        next();
+        // 6. Request is allowed
+        return next();
 
     } catch (error) {
         return res.status(401).json({

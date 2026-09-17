@@ -4,29 +4,32 @@ const path = require("path");
 const logDirectory = path.join(__dirname, "../../logs");
 const logFile = path.join(logDirectory, "access.log");
 
-function auditLog({
-    username,
+function buildAuditEntry({
+    user,
     role,
     action,
     resource,
     decision,
     reason
 }) {
-
-    // Create logs directory if it doesn't exist
-    if (!fs.existsSync(logDirectory)) {
-        fs.mkdirSync(logDirectory, { recursive: true });
-    }
-
-    const entry = {
+    return {
         timestamp: new Date().toISOString(),
-        username,
+        username: user,
         role,
         action,
         resource,
         decision,
         reason
     };
+}
+
+function auditLog(decision) {
+    // Create logs directory if it doesn't exist
+    if (!fs.existsSync(logDirectory)) {
+        fs.mkdirSync(logDirectory, { recursive: true });
+    }
+
+    const entry = buildAuditEntry(decision);
 
     fs.appendFileSync(
         logFile,
@@ -35,5 +38,6 @@ function auditLog({
 }
 
 module.exports = {
-    auditLog
+    auditLog,
+    buildAuditEntry
 };
