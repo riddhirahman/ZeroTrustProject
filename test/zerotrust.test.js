@@ -59,7 +59,7 @@ test("unknown roles are denied by default", () => {
     assert.equal(decision.reason, "Unknown user role");
 });
 
-test("repeated denials create one security event at the threshold", () => {
+test("repeated denials create a stage-one rate limit", () => {
     let now = 0;
     const monitor = createDenialMonitor({
         threshold: 3,
@@ -84,8 +84,55 @@ test("repeated denials create one security event at the threshold", () => {
     assert.equal(securityEvent.deniedAttemptCount, 3);
     assert.equal(securityEvent.username, "riddhi");
 
-    now += 1_000;
-    assert.equal(monitor.recordDecision(denial), null);
+    assert.deepEqual(
+        monitor.getRateLimit({
+            user: "riddhi",
+            role: "USER",
+            resource: "/api/admin"
+        }),
+        { stage: 1, retryAfterSeconds: 300 }
+    );
+});
+
+test("a denial after stage one escalates to a one-hour cooldown", () => {
+    let now = 0;
+    const monitor = createDenialMonitor({ clock: () => now });
+    const denial = {
+        user: "riddhi", role: "USER", action: "GET",
+        resource: "/api/admin", decision: "DENY"
+    };
+
+    monitor.recordDecision(denial);
+    monitor.recordDecision(denial);
+    monitor.recordDecision(denial);
+    now += 5 * 60 * 1000;
+
+    const securityEvent = monitor.recordDecision(denial);
+    assert.equal(securityEvent.type, "RATE_LIMIT_ESCALATED");
+    assert.deepEqual(
+        monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
+        { stage: 2, retryAfterSeconds: 3600 }
+    );
+});
+
+test("an allowed request after stage one resets the user", () => {
+    let now = 0;
+    const monitor = createDenialMonitor({ clock: () => now });
+    const denial = {
+        user: "riddhi", role: "USER", action: "GET",
+        resource: "/api/admin", decision: "DENY"
+    };
+
+    monitor.recordDecision(denial);
+    monitor.recordDecision(denial);
+    monitor.recordDecision(denial);
+    now += 5 * 60 * 1000;
+    monitor.recordDecision({ ...denial, decision: "ALLOW" });
+
+    assert.equal(
+        monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
+        null
+    );
 });
 
 test("allowed decisions do not create a security event", () => {

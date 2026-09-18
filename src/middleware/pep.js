@@ -1,5 +1,8 @@
 const { auditLog } = require("../zerotrust/audit"); //Require the auditLog function from the audit.js file
-const { monitorAuthorizationDecision } = require("../zerotrust/security-monitor");
+const {
+    getRateLimit,
+    monitorAuthorizationDecision
+} = require("../zerotrust/security-monitor");
 const jwt = require("jsonwebtoken");
 const { evaluatePolicy } = require("../zerotrust/pdp");
 
@@ -38,10 +41,27 @@ function pep(req, res, next) {
             role: decoded.role
         });
 
-        // 2. Ask PDP for authorization decision
+        // 2. Identify the requested resource and action.
         const resource = req.originalUrl.split("?")[0];
         const action = req.method;
 
+        // 3. Block repeated denied attempts before they reach the PDP.
+        const rateLimit = getRateLimit({
+            user: decoded.username,
+            role: decoded.role,
+            resource
+        });
+        if (rateLimit) {
+            res.set("Retry-After", String(rateLimit.retryAfterSeconds));
+            return res.status(429).json({
+                decision: "RATE_LIMITED",
+                reason: "You are being rate limited due to repeated unauthorized requests. Please try again later.",
+                rateLimitStage: rateLimit.stage,
+                retryAfterSeconds: rateLimit.retryAfterSeconds
+            });
+        }
+
+        // 4. Ask PDP for authorization decision.
         const policyResult = evaluatePolicy(
             decoded,
             action,
@@ -50,21 +70,21 @@ function pep(req, res, next) {
 
         console.log("[PDP]", policyResult);
 
-        // 3. Record authorization decision
+        // 5. Record authorization decision.
         auditLog(policyResult);
 
-        // 4. Detect repeated denied attempts without changing the PDP decision.
+        // 6. Detect repeated denied attempts and enable temporary rate limiting.
         const securityEvent = monitorAuthorizationDecision(policyResult);
         if (securityEvent) {
             console.warn("[Security Monitor]", securityEvent);
         }
 
-        // 5. PEP enforces PDP decision
+        // 7. PEP enforces PDP decision.
         if (policyResult.decision === "DENY") {
             return res.status(403).json(policyResult);
         }
 
-        // 6. Request is allowed
+        // 8. Request is allowed.
         return next();
 
     } catch (error) {
