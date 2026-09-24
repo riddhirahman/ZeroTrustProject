@@ -12,6 +12,7 @@ function createDenialMonitor({
     clock = () => Date.now()
 } = {}) {
     const deniedAttempts = new Map();
+    const stageOneAttempts = new Map();
     const cooldowns = new Map();
 
     function buildKey({ user, role, resource }) {
@@ -53,12 +54,24 @@ function createDenialMonitor({
             if (decision.decision === "ALLOW") {
                 cooldowns.delete(key);
                 deniedAttempts.delete(key);
+                stageOneAttempts.delete(key);
                 return null;
             }
 
             if (decision.decision === "DENY") {
+                const attempts = (stageOneAttempts.get(key) || [])
+                    .filter(timestamp => now - timestamp <= windowMs);
+
+                attempts.push(now);
+                stageOneAttempts.set(key, attempts);
+
+                if (attempts.length !== threshold) {
+                    return null;
+                }
+
                 const expiresAt = now + stageTwoCooldownMs;
                 cooldowns.set(key, { stage: 2, expiresAt });
+                stageOneAttempts.delete(key);
 
                 return {
                     timestamp: new Date(now).toISOString(),
@@ -67,6 +80,7 @@ function createDenialMonitor({
                     role: decision.role,
                     action: decision.action,
                     resource: decision.resource,
+                    deniedAttemptCount: attempts.length,
                     cooldownSeconds: stageTwoCooldownMs / 1000,
                     rateLimitExpiresAt: new Date(expiresAt).toISOString(),
                     recommendation: "Repeated unauthorized activity after the grace period. One-hour rate limiting has been enabled."

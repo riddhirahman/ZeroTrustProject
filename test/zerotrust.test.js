@@ -94,7 +94,7 @@ test("repeated denials create a stage-one rate limit", () => {
     );
 });
 
-test("a denial after stage one escalates to a one-hour cooldown", () => {
+test("three denials after stage one escalate to a one-hour cooldown", () => {
     let now = 0;
     const monitor = createDenialMonitor({ clock: () => now });
     const denial = {
@@ -107,8 +107,13 @@ test("a denial after stage one escalates to a one-hour cooldown", () => {
     monitor.recordDecision(denial);
     now += 5 * 60 * 1000;
 
+    assert.equal(monitor.recordDecision(denial), null);
+    now += 1_000;
+    assert.equal(monitor.recordDecision(denial), null);
+    now += 1_000;
     const securityEvent = monitor.recordDecision(denial);
     assert.equal(securityEvent.type, "RATE_LIMIT_ESCALATED");
+    assert.equal(securityEvent.deniedAttemptCount, 3);
     assert.deepEqual(
         monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
         { stage: 2, retryAfterSeconds: 3600 }

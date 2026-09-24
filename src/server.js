@@ -3,12 +3,14 @@ require("dotenv").config();
 const express = require("express");
 const authRoutes = require("./routes/auth");
 const protectedRoutes = require("./routes/protected");
+const securityEventsRoutes = require("./routes/security-events");
 
 const app = express();
 
 app.use(express.json());
 app.use("/auth", authRoutes);
 app.use("/api", protectedRoutes);
+app.use("/api", securityEventsRoutes);
 
 app.get("/", (req, res) => {
     res.json({
