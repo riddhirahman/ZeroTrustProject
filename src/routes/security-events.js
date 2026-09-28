@@ -10,24 +10,43 @@ const securityEventFile = path.join(
     "../../logs/security-events.log"
 );
 
-router.get("/security/events", pep, (req, res) => {
-
+function readSecurityEvents() {
     if (!fs.existsSync(securityEventFile)) {
-        return res.json({
-            events: []
-        });
+        return [];
     }
 
-    const events = fs.readFileSync(
+    return fs.readFileSync(
         securityEventFile,
         "utf8"
     )
     .split("\n")
     .filter(line => line.trim() !== "")
     .map(line => JSON.parse(line));
+}
+
+router.get("/security/events", pep, (req, res) => {
+    const events = readSecurityEvents();
 
     return res.json({
         events
+    });
+});
+
+router.get("/security/stats", pep, (req, res) => {
+    const events = readSecurityEvents();
+
+    const repeatedDenials = events.filter(
+        event => event.type === "REPEATED_DENIAL"
+    ).length;
+
+    const rateLimitEscalations = events.filter(
+        event => event.type === "RATE_LIMIT_ESCALATED"
+    ).length;
+
+    return res.json({
+        totalEvents: events.length,
+        repeatedDenials,
+        rateLimitEscalations
     });
 });
 
