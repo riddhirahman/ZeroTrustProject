@@ -25,7 +25,7 @@ test("login timings are similar for existing and nonexistent users", async () =>
             { key: "nonexistent", username: "timing-test-missing-user" }
         ];
 
-        for (let index = 0; index < 7; index += 1) {
+        for (let index = 0; index < 5; index += 1) {
             for (const attempt of attempts) {
                 const startedAt = performance.now();
                 const response = await fetch(`http://127.0.0.1:${address.port}/auth/login`, {

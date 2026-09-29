@@ -6,6 +6,17 @@ const {
 const jwt = require("jsonwebtoken");
 const { evaluatePolicy } = require("../zerotrust/pdp");
 
+function normalizeResource(url) {
+    let resource = url.split("?")[0].toLowerCase();
+
+    // Remove trailing slash(es), except for "/"
+    if (resource.length > 1) {
+        resource = resource.replace(/\/+$/, "");
+    }
+
+    return resource;
+}
+
 function pep(req, res, next) {
     const authHeader = req.headers.authorization;
 
@@ -42,7 +53,7 @@ function pep(req, res, next) {
         });
 
         // 2. Identify the requested resource and action.
-        const resource = req.originalUrl.split("?")[0];
+        const resource = normalizeResource(req.originalUrl);
         const action = req.method;
 
         // 3. Block repeated denied attempts before they reach the PDP.

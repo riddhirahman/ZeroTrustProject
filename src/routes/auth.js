@@ -1,11 +1,24 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const rateLimit = require("express-rate-limit");
 
 const router = express.Router();
 
 const DUMMY_PASSWORD_HASH =
     "$2b$10$S283OTgCJMQzzEtKu5pmPO7b4z3gaZNgCB.pu/FAn77V3a/UOga4q"; // bcrypt hash for "dummyPassword"
+
+//rate limiter for login route to prevent brute force attacks (pre PEP) #Vulnerability #3
+const loginLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    standardHeaders: "draft-8",
+    legacyHeaders: false,
+    message: {
+        decision: "RATE_LIMITED",
+        reason: "Too many login attempts. Please try again later."
+    }
+});
 
 // Temporary users for development.
 // replace this with MongoDB later.
@@ -24,7 +37,7 @@ const users = [
     }
 ];
 
-router.post("/login", async (req, res) => {
+router.post("/login", loginLimiter, async (req, res) => {
     const { username, password } = req.body || {};
 
     if (!username || !password) {

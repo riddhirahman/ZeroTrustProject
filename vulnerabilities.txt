@@ -1,15 +1,19 @@
 29/9 list of vulnerabilities
 🔴 Critical — Full auth bypass via leaked JWT secret
 Your .env.example (the file meant to be a template others commit/share) contains the real JWT_SECRET — identical to the one in .env. Anyone with this repo can forge a token for any user/role with no credentials at all. I proved it: I minted a token for username: "attacker", role: "ADMIN" using only the secret from .env.example, and it got me full access to /api/admin and /api/security/events. This single leak defeats the entire zero trust layer — identity and authorization are both derived from a JWT whose signing key isn't actually secret. Fix: put a placeholder in .env.example (e.g. JWT_SECRET=changeme), rotate the real secret immediately, confirm .env is git-ignored (it is), and audit git history in case it was ever committed for real.
+Solved 29/9
 
 🟠 High — Username enumeration via timing side-channel
 /auth/login only calls bcrypt.compare when the username exists. I measured ~67ms average response for a real username vs ~1ms for a nonexistent one — a 60x difference, trivially detectable by a script. Fix: always run a bcrypt comparison (against a dummy hash) even when the user isn't found, so both paths take equivalent time.
+Solved 29/9
 
 🟠 High — No rate limiting on /auth/login
 I sent 20 login attempts in 1.6 seconds with zero throttling — the PEP's rate limiter only guards authenticated requests to /api/*, not the login endpoint itself. Combined with the weak seeded passwords (user123, admin123), this endpoint is brute-forceable. Fix: add rate limiting/lockout (e.g. express-rate-limit) in front of /auth/login specifically, and drop the weak default passwords even in dev.
+solved 29/9
 
 🟡 Medium — Rate limiter / security monitor trivially evaded
 The denial rate-limiter keys strictly on the literal resource string (req.originalUrl). I triggered the 3-strike lockout on /api/admin, then simply requested /api/admin/ (trailing slash) and /api/Admin (different case) — both were treated as brand-new resources with fresh counters, even though the PDP still denies them. An attacker (or a vulnerability scanner) can enumerate endless trivial URL variants and never trip your lockout or "repeated denial" alerting. Fix: normalize the resource path (lowercase, strip trailing slash) before using it as both the PDP lookup key and the rate-limit key.
+solved 29/9
 
 🟢 Low — Hardcoded credentials & plaintext secrets in the repo
 token.txt (git-ignored, but was in the zip you sent me) contains real signed JWTs. auth.js hardcodes two accounts with weak passwords directly in source. Fine for a scratch dev build, but worth flagging so it doesn't leak into a "real" version later.
