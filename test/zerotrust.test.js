@@ -1,9 +1,64 @@
 const assert = require("node:assert/strict");
+const express = require("express");
+const http = require("node:http");
 const test = require("node:test");
+const { performance } = require("node:perf_hooks");
 
 const { evaluatePolicy } = require("../src/zerotrust/pdp");
 const { buildAuditEntry } = require("../src/zerotrust/audit");
 const { createDenialMonitor } = require("../src/zerotrust/security-monitor");
+const authRoutes = require("../src/routes/auth");
+
+test("login timings are similar for existing and nonexistent users", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/auth", authRoutes);
+
+    const server = http.createServer(app);
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+        const address = server.address();
+        const timings = { existing: [], nonexistent: [] };
+        const attempts = [
+            { key: "existing", username: "Riddhi" },
+            { key: "nonexistent", username: "timing-test-missing-user" }
+        ];
+
+        for (let index = 0; index < 7; index += 1) {
+            for (const attempt of attempts) {
+                const startedAt = performance.now();
+                const response = await fetch(`http://127.0.0.1:${address.port}/auth/login`, {
+                    method: "POST",
+                    headers: { "content-type": "application/json" },
+                    body: JSON.stringify({ username: attempt.username, password: "wrong-password" })
+                });
+                timings[attempt.key].push(performance.now() - startedAt);
+                assert.equal(response.status, 401);
+            }
+        }
+
+        const median = values => {
+            const sorted = [...values].sort((left, right) => left - right);
+            return sorted[Math.floor(sorted.length / 2)];
+        };
+        const existingMedian = median(timings.existing);
+        const nonexistentMedian = median(timings.nonexistent);
+        const timingRatio = existingMedian / nonexistentMedian;
+
+        console.log("Login response timings (ms):", JSON.stringify(timings));
+        console.log("Login median timing ratio:", timingRatio.toFixed(2));
+        assert.ok(
+            timingRatio >= 0.33 && timingRatio <= 3,
+            `Existing and nonexistent user timing medians differ too much: ${timingRatio.toFixed(2)}x`
+        );
+    } finally {
+        await new Promise((resolve, reject) => {
+            server.close(error => error ? reject(error) : resolve());
+            server.closeAllConnections();
+        });
+    }
+});
 
 test("USER may read and update their profile", () => {
     for (const action of ["GET", "POST"]) {

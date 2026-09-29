@@ -4,6 +4,9 @@ const jwt = require("jsonwebtoken");
 
 const router = express.Router();
 
+const DUMMY_PASSWORD_HASH =
+    "$2b$10$S283OTgCJMQzzEtKu5pmPO7b4z3gaZNgCB.pu/FAn77V3a/UOga4q"; // bcrypt hash for "dummyPassword"
+
 // Temporary users for development.
 // replace this with MongoDB later.
 const users = [
@@ -30,17 +33,21 @@ router.post("/login", async (req, res) => {
         });
     }
 
-    const user = users.find(u => u.username === username);
+const user = users.find(u => u.username === username);
 
-    if (!user) {
-        return res.status(401).json({
-            message: "Invalid username or password"
-        });
-    }
+// Always perform bcrypt comparison. VULNERABILITY #2
+// This prevents username enumeration through timing differences.
 
-    const passwordValid = await bcrypt.compare(password, user.password);
+    const passwordHash = user
+        ? user.password
+        : DUMMY_PASSWORD_HASH;
 
-    if (!passwordValid) {
+    const passwordMatch = await bcrypt.compare(
+        password,
+        passwordHash
+    );
+
+    if (!user || !passwordMatch) {
         return res.status(401).json({
             message: "Invalid username or password"
         });
