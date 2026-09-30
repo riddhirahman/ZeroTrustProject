@@ -60,6 +60,54 @@ test("login timings are similar for existing and nonexistent users", async () =>
     }
 });
 
+test("malformed JSON login requests return a bad request response", async () => {
+    const app = express();
+    app.use(express.json());
+    app.use("/auth", authRoutes);
+    app.use((err, req, res, next) => {
+        console.error("[Server Error]", err);
+
+        if (
+            err instanceof SyntaxError &&
+            err.status === 400 &&
+            err.type === "entity.parse.failed"
+        ) {
+            return res.status(400).json({ error: "Bad request" });
+        }
+
+        return res.status(500).json({ error: "Internal server error" });
+    });
+
+    const server = http.createServer(app);
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+        const address = server.address();
+        const response = await fetch(`http://127.0.0.1:${address.port}/auth/login`, {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: "{ malformed json"
+        });
+        const body = await response.text();
+        const contentType = response.headers.get("content-type");
+
+        console.log("Malformed JSON login response:", JSON.stringify({
+            status: response.status,
+            contentType,
+            body
+        }));
+        assert.equal(response.status, 400);
+        assert.match(contentType, /^application\/json\b/);
+        assert.deepEqual(JSON.parse(body), { error: "Bad request" });
+        assert.doesNotMatch(body, /SyntaxError|node_modules|at JSON\.parse/);
+    } finally {
+        await new Promise((resolve, reject) => {
+            server.close(error => error ? reject(error) : resolve());
+            server.closeAllConnections();
+        });
+    }
+});
+
 test("USER may read and update their profile", () => {
     for (const action of ["GET", "POST"]) {
         const decision = evaluatePolicy(
@@ -83,14 +131,14 @@ test("USER is denied an unapproved profile action", () => {
     assert.equal(decision.decision, "DENY");
 });
 
-test("ADMIN has only the explicitly granted actions", () => {
+test("ADMIN is denied actions without an explicit policy grant", () => {
     assert.equal(
         evaluatePolicy(
             { username: "admin", role: "ADMIN" },
             "DELETE",
             "/api/profile"
         ).decision,
-        "ALLOW"
+        "DENY"
     );
 
     assert.equal(

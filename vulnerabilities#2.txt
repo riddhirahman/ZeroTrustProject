@@ -1,0 +1,16 @@
+🟠 High — Stack traces leaked to unauthenticated users
+Sending malformed JSON to /auth/login (no auth required) returns a raw Express/Node error page with a full stack trace, including absolute filesystem paths (/home/.../body-parser/lib/types/json.js:91) and exact library file structure. No auth needed to trigger it. This hands an attacker your directory layout and exact dependency internals for free — useful for fingerprinting known CVEs in your exact body-parser/raw-body versions. Fix: add a centralized error-handling middleware in server.js that catches JSON parse errors and any other thrown errors, and returns a generic {error: "Bad request"} with no stack trace. Stack traces should only ever go to server-side logs, never the response body.
+
+🟡 Medium — No security headers, framework fingerprinting
+Every response carries X-Powered-By: Express, and there's no helmet (or manual headers) setting X-Content-Type-Options, X-Frame-Options, or a Content-Security-Policy on normal responses (interestingly, Express 5's default error pages do set some of these — your actual API routes don't). Low severity on its own for a pure JSON API, but it's free hardening and removes an easy fingerprinting signal. Fix: app.disable('x-powered-by') plus helmet().
+
+🟡 Medium — Policy/route drift: a live grant with no live route
+The PDP explicitly grants ADMIN → DELETE /api/profile, but protected.js never defines a DELETE handler — right now that just 404s, so it's harmless. But it means the policy config and the actual route surface have quietly diverged. If someone adds a generic DELETE handler later assuming "the PDP already covers this resource," it'll be live with no additional review. Fix: either implement the handler now or remove the unused grant, and treat PDP policy changes and route additions as one atomic change going forward.
+
+🟢 Low / forward-looking — jwt.verify() doesn't pin the algorithm, and trust proxy isn't set
+Two things that aren't exploitable today but matter once this leaves your machine: jwt.verify(token, secret) accepts any HMAC algorithm the library allows since algorithms: ['HS256'] isn't explicitly passed — cheap defense-in-depth to add now before anyone considers asymmetric keys. Separately, server.js never calls app.set('trust proxy', ...). Locally that's fine — I confirmed spoofing X-Forwarded-For does nothing right now. But the moment this sits behind a real reverse proxy/load balancer and someone flips trust proxy to true (common, for accurate client IP logging) without restricting it to the actual proxy hop, your login rate limiter becomes trivially bypassable — every brute-force request just sends a different fake X-Forwarded-For and gets a fresh bucket. Worth a comment in the code now so whoever deploys this doesn't reintroduce vulnerability #3 by accident.
+
+
+#5 High — Unhandled errors / stack-trace disclosure
+#6 Medium - Security header and framework fingerprinting hardening
+#7 Medium — Policy/Route Drift

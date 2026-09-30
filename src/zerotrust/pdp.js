@@ -10,7 +10,7 @@ const policies = {
     },
 
     ADMIN: {
-        "/api/profile": ["GET", "POST", "DELETE"],
+        "/api/profile": ["GET", "POST"],
         "/api/admin": ["GET"],
         "/api/security/events": ["GET"],
         "/api/security/stats": ["GET"]
