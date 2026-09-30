@@ -1,0 +1,25 @@
+🟠 High — OPTIONS requests bypass the PEP entirely, unauthenticated
+
+This is the one I'd fix first. I sent OPTIONS to /api/admin and /api/profile with zero Authorization header and got:
+
+HTTP/1.1 200 OK
+Allow: GET, HEAD
+
+No token check, no PDP evaluation, nothing logged through your audit trail. This is Express's built-in automatic OPTIONS responder — when a path has any route registered (router.get(...)), Express auto-handles OPTIONS for that path at the router level, before the path's own middleware stack (including pep) ever runs. Functionally it's "just" reconnaissance right now (confirms which routes exist and which methods they accept, to anyone, no credentials), but for a project whose entire premise is "every request passes through the enforcement point," this is a structural hole in that guarantee — there's an HTTP verb that walks straight past your zero trust layer. Fix: either explicitly handle OPTIONS on each route through pep (e.g. router.options("/admin", pep, ...)), or add middleware ahead of the routers that intercepts OPTIONS and applies your own policy instead of letting Express's default kick in.
+
+🟡 Medium — Unbounded memory growth from the denial-tracking Maps
+
+I logged in as the low-privilege USER account and hit 5,000 unique nonexistent resource paths (/api/nonexistent-resource-0 … -4999), each denied exactly once. Node's RSS grew from 65MB to 101MB and never came back down:
+
+RSS before: 65264 KB
+RSS after:  101264 KB
+
+Looking at security-monitor.js: deniedAttempts (and similar maps) key on user|role|resource, and an entry is only ever deleted along the "recovered after stage-1 cooldown" path. A denial that never reaches the 3-strike threshold — which is exactly what happens if you hit many different resource paths instead of the same one — leaves a permanent Map entry that's never cleaned up. Any authenticated user, even your lowest-privilege one, can grow this indefinitely just by hitting garbage URLs. Over enough volume (or enough time, from ordinary 404 traffic) this becomes a slow, attacker-triggerable memory leak toward OOM. Fix: add a periodic sweep (or a max-size/LRU eviction) that drops deniedAttempts/stageOneAttempts entries whose timestamps have all aged out of the window, regardless of whether they ever escalated.
+
+🟢 Low — No type validation on login body → crashes into a generic 500
+
+{"username":"admin","password":{"$ne":null}} (or an array, or a bare number) crashes bcrypt.compare with data and hash must be strings. Your centralized error handler catches it cleanly — no stack trace leaks, confirmed — but it's still an uninformative 500 for what should be a 400 Bad Request, and it needlessly exercises your error-logging path. Fix: validate typeof username === "string" && typeof password === "string" before touching bcrypt.
+
+🟢 Low — Oversized payload correctly blocked, but returns the wrong status
+
+Sent a 5MB and a 191MB body to /auth/login. Body-parser's default 100KB limit correctly rejected both before any real memory pressure — no DoS here, this control works. But your error middleware only checks for entity.parse.failed (malformed JSON), not entity.too.large, so oversized-payload rejections fall through to the generic 500 handler instead of the correct 413. Cosmetic, but it means legitimate size-limit hits are indistinguishable from real bugs in your monitoring. Fix: add an explicit branch for err.type === "entity.too.large" → 413.

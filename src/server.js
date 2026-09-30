@@ -6,18 +6,30 @@ const helmet = require("helmet");
 const authRoutes = require("./routes/auth");
 const protectedRoutes = require("./routes/protected");
 const securityEventsRoutes = require("./routes/security-events");
+const pep = require("./middleware/pep");
 
 const app = express();
 
-// Disable Express framework fingerprinting
 app.disable("x-powered-by");
 
-// Add security-related HTTP headers
 app.use(helmet());
-
 app.use(express.json());
 
 app.use("/auth", authRoutes);
+
+// Intercept OPTIONS requests to protected API resources.
+// This prevents Express automatic OPTIONS handling from
+// bypassing the Zero Trust enforcement layer.
+app.use("/api", (req, res, next) => {
+    if (req.method === "OPTIONS") {
+        return pep(req, res, () => {
+            return res.status(204).end();
+        });
+    }
+
+    next();
+});
+
 app.use("/api", protectedRoutes);
 app.use("/api", securityEventsRoutes);
 
@@ -41,6 +53,13 @@ app.use((err, req, res, next) => {
     ) {
         return res.status(400).json({
             error: "Bad request"
+        });
+    }
+
+    // Handle request body that exceeds express.json() limit
+    if (err.type === "entity.too.large") {
+        return res.status(413).json({
+            error: "Payload too large"
         });
     }
 

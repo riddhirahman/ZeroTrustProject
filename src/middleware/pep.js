@@ -28,19 +28,12 @@ function pep(req, res, next) {
         });
     }
 
-    const token = jwt.sign(
-        {
-            username: user.username,
-            role: user.role
-        },
-        process.env.JWT_SECRET,
-        {
-            algorithm: "HS256"
-        }
-    );
-
-    // Invalid format
-    if (!token) {
+    const [scheme, token, ...extraParts] = authHeader.trim().split(/\s+/);
+    if (
+        scheme.toLowerCase() !== "bearer" ||
+        !token ||
+        extraParts.length > 0
+    ) {
         return res.status(401).json({
             decision: "DENY",
             reason: "Invalid authorization format"
@@ -49,13 +42,13 @@ function pep(req, res, next) {
 
     try {
         // 1. Verify identity/session
-    const decoded = jwt.verify(
-        token,
-        process.env.JWT_SECRET,
-        {
-            algorithms: ["HS256"]
-        }
-    );
+        const decoded = jwt.verify(
+            token,
+            process.env.JWT_SECRET,
+            {
+                algorithms: ["HS256"]
+            }
+        );
 
         req.user = decoded;
 

@@ -2,7 +2,10 @@ const fs = require("fs");
 const path = require("path");
 
 const logDirectory = path.join(__dirname, "../../logs");
-const securityEventFile = path.join(logDirectory, "security-events.log");
+const securityEventFile = path.join(
+    logDirectory,
+    "security-events.log"
+);
 
 function createDenialMonitor({
     threshold = 3,
@@ -13,10 +16,49 @@ function createDenialMonitor({
 } = {}) {
     const deniedAttempts = new Map();
     const stageOneAttempts = new Map();
+    const stageOneTriggered = new Set();
     const cooldowns = new Map();
 
     function buildKey({ user, role, resource }) {
         return `${user}|${role}|${resource}`;
+    }
+
+    function cleanupExpiredEntries() {
+        const now = clock();
+
+        // Remove denial-tracking entries whose
+        // entire observation window has expired.
+        for (const [key, timestamps] of deniedAttempts.entries()) {
+            const activeAttempts = timestamps.filter(
+                timestamp => now - timestamp <= windowMs
+            );
+
+            if (activeAttempts.length === 0) {
+                deniedAttempts.delete(key);
+            } else {
+                deniedAttempts.set(key, activeAttempts);
+            }
+        }
+
+        // Remove expired stage-one tracking entries.
+        for (const [key, timestamps] of stageOneAttempts.entries()) {
+            const activeAttempts = timestamps.filter(
+                timestamp => now - timestamp <= windowMs
+            );
+
+            if (activeAttempts.length === 0) {
+                stageOneAttempts.delete(key);
+            } else {
+                stageOneAttempts.set(key, activeAttempts);
+            }
+        }
+
+        // Remove expired cooldown entries.
+        for (const [key, cooldown] of cooldowns.entries()) {
+            if (now >= cooldown.expiresAt) {
+                cooldowns.delete(key);
+            }
+        }
     }
 
     function getRateLimit(subject) {
@@ -31,112 +73,136 @@ function createDenialMonitor({
         if (now < cooldown.expiresAt) {
             return {
                 stage: cooldown.stage,
-                retryAfterSeconds: Math.ceil((cooldown.expiresAt - now) / 1000)
+                retryAfterSeconds: Math.ceil(
+                    (cooldown.expiresAt - now) / 1000
+                )
             };
         }
 
-        // Stage one expiry provides a grace request for normal PDP evaluation.
-        if (cooldown.stage === 1) {
-            return null;
-        }
-
+        // Cooldown has expired.
         cooldowns.delete(key);
+
         return null;
     }
 
     function recordDecision(decision) {
         const key = buildKey(decision);
         const now = clock();
-        const previousCooldown = cooldowns.get(key);
 
-        // The first request after stage one either clears the user or escalates.
-        if (previousCooldown && previousCooldown.stage === 1 && now >= previousCooldown.expiresAt) {
-            if (decision.decision === "ALLOW") {
-                cooldowns.delete(key);
-                deniedAttempts.delete(key);
-                stageOneAttempts.delete(key);
-                return null;
-            }
+        // Remove stale state before processing
+        // the new authorization decision.
+        cleanupExpiredEntries();
 
-            if (decision.decision === "DENY") {
-                const attempts = (stageOneAttempts.get(key) || [])
-                    .filter(timestamp => now - timestamp <= windowMs);
-
-                attempts.push(now);
-                stageOneAttempts.set(key, attempts);
-
-                if (attempts.length !== threshold) {
-                    return null;
-                }
-
-                const expiresAt = now + stageTwoCooldownMs;
-                cooldowns.set(key, { stage: 2, expiresAt });
-                stageOneAttempts.delete(key);
-
-                return {
-                    timestamp: new Date(now).toISOString(),
-                    type: "RATE_LIMIT_ESCALATED",
-                    username: decision.user,
-                    role: decision.role,
-                    action: decision.action,
-                    resource: decision.resource,
-                    deniedAttemptCount: attempts.length,
-                    cooldownSeconds: stageTwoCooldownMs / 1000,
-                    rateLimitExpiresAt: new Date(expiresAt).toISOString(),
-                    recommendation: "Repeated unauthorized activity after the grace period. One-hour rate limiting has been enabled."
-                };
-            }
-        }
+        /*
+         * Existing cooldown/escalation logic
+         * remains below.
+         */
 
         if (decision.decision !== "DENY") {
+            deniedAttempts.delete(key);
+            stageOneAttempts.delete(key);
+            stageOneTriggered.delete(key);
+            cooldowns.delete(key);
             return null;
         }
 
-        const attempts = (deniedAttempts.get(key) || [])
-            .filter(timestamp => now - timestamp <= windowMs);
+        const attemptsByStage = stageOneTriggered.has(key)
+            ? stageOneAttempts
+            : deniedAttempts;
+        const attempts = (attemptsByStage.get(key) || [])
+            .filter(
+                timestamp => now - timestamp <= windowMs
+            );
 
         attempts.push(now);
-        deniedAttempts.set(key, attempts);
+        attemptsByStage.set(key, attempts);
 
-        if (attempts.length !== threshold) {
+        if (attempts.length < threshold) {
             return null;
         }
 
-        const expiresAt = now + stageOneCooldownMs;
-        cooldowns.set(key, { stage: 1, expiresAt });
+        const isEscalation = stageOneTriggered.has(key);
+        const cooldownDurationMs = isEscalation
+            ? stageTwoCooldownMs
+            : stageOneCooldownMs;
+        const expiresAt = now + cooldownDurationMs;
+
+        cooldowns.set(key, {
+            stage: isEscalation ? 2 : 1,
+            expiresAt
+        });
+
+        if (isEscalation) {
+            stageOneAttempts.delete(key);
+        } else {
+            stageOneTriggered.add(key);
+            deniedAttempts.delete(key);
+        }
 
         return {
             timestamp: new Date(now).toISOString(),
-            type: "REPEATED_DENIAL",
+            type: isEscalation ? "RATE_LIMIT_ESCALATED" : "REPEATED_DENIAL",
             username: decision.user,
             role: decision.role,
             action: decision.action,
             resource: decision.resource,
             deniedAttemptCount: attempts.length,
             windowSeconds: windowMs / 1000,
-            cooldownSeconds: stageOneCooldownMs / 1000,
+            cooldownSeconds: cooldownDurationMs / 1000,
             rateLimitExpiresAt: new Date(expiresAt).toISOString(),
-            recommendation: "Review this account's recent authorization activity."
+            recommendation: isEscalation
+                ? "Review this account's repeated authorization denials."
+                : "Review this account's recent authorization activity."
         };
     }
 
-    return { recordDecision, getRateLimit };
+    return {
+        recordDecision,
+        getRateLimit,
+        cleanupExpiredEntries
+    };
 }
 
 const denialMonitor = createDenialMonitor();
 
+/*
+ * Periodically clean stale monitoring state.
+ *
+ * The interval is intentionally longer than the normal
+ * request-processing path so cleanup does not happen
+ * on every request.
+ */
+const cleanupInterval = setInterval(
+    () => {
+        denialMonitor.cleanupExpiredEntries();
+    },
+    60 * 1000
+);
+
+// Do not keep Node.js alive only because of this timer.
+if (cleanupInterval.unref) {
+    cleanupInterval.unref();
+}
+
 function monitorAuthorizationDecision(decision) {
-    const securityEvent = denialMonitor.recordDecision(decision);
+    const securityEvent =
+        denialMonitor.recordDecision(decision);
 
     if (!securityEvent) {
         return null;
     }
 
     if (!fs.existsSync(logDirectory)) {
-        fs.mkdirSync(logDirectory, { recursive: true });
+        fs.mkdirSync(logDirectory, {
+            recursive: true
+        });
     }
 
-    fs.appendFileSync(securityEventFile, JSON.stringify(securityEvent) + "\n");
+    fs.appendFileSync(
+        securityEventFile,
+        JSON.stringify(securityEvent) + "\n"
+    );
+
     return securityEvent;
 }
 

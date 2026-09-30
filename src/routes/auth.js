@@ -8,7 +8,7 @@ const router = express.Router();
 const DUMMY_PASSWORD_HASH =
     "$2b$10$S283OTgCJMQzzEtKu5pmPO7b4z3gaZNgCB.pu/FAn77V3a/UOga4q"; // bcrypt hash for "dummyPassword"
 
-//rate limiter for login route to prevent brute force attacks (pre PEP) #Vulnerability #3
+// Rate limiter for login route to prevent brute-force attacks (pre-PEP)
 const loginLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 10,
@@ -21,7 +21,7 @@ const loginLimiter = rateLimit({
 });
 
 // Temporary users for development.
-// replace this with MongoDB later.
+// Replace this with MongoDB later.
 const users = [
     {
         id: 1,
@@ -40,17 +40,30 @@ const users = [
 router.post("/login", loginLimiter, async (req, res) => {
     const { username, password } = req.body || {};
 
+    // Validate input types before passing data to bcrypt.
+    if (
+        typeof username !== "string" ||
+        typeof password !== "string"
+    ) {
+        return res.status(400).json({
+            message: "Username and password must be strings"
+        });
+    }
+
+    // Check for empty credentials.
     if (!username || !password) {
         return res.status(400).json({
             message: "Username and password are required"
         });
     }
 
-const user = users.find(u => u.username === username);
+    const user = users.find(
+        u => u.username === username
+    );
 
-// Always perform bcrypt comparison. VULNERABILITY #2
-// This prevents username enumeration through timing differences.
-
+    // Always perform bcrypt comparison.
+    // Use a dummy hash when the username does not exist
+    // to prevent username enumeration through timing differences.
     const passwordHash = user
         ? user.password
         : DUMMY_PASSWORD_HASH;
@@ -60,6 +73,7 @@ const user = users.find(u => u.username === username);
         passwordHash
     );
 
+    // Do not reveal whether the username exists.
     if (!user || !passwordMatch) {
         return res.status(401).json({
             message: "Invalid username or password"
@@ -74,11 +88,12 @@ const user = users.find(u => u.username === username);
         },
         process.env.JWT_SECRET,
         {
-            expiresIn: "1h"
+            expiresIn: "1h",
+            algorithm: "HS256"
         }
     );
 
-    res.json({
+    return res.json({
         message: "Login successful",
         token
     });

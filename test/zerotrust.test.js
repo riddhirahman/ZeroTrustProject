@@ -3,11 +3,13 @@ const express = require("express");
 const http = require("node:http");
 const test = require("node:test");
 const { performance } = require("node:perf_hooks");
+const jwt = require("jsonwebtoken");
 
 const { evaluatePolicy } = require("../src/zerotrust/pdp");
 const { buildAuditEntry } = require("../src/zerotrust/audit");
 const { createDenialMonitor } = require("../src/zerotrust/security-monitor");
 const authRoutes = require("../src/routes/auth");
+const protectedRoutes = require("../src/routes/protected");
 
 test("login timings are similar for existing and nonexistent users", async () => {
     const app = express();
@@ -105,6 +107,46 @@ test("malformed JSON login requests return a bad request response", async () => 
             server.close(error => error ? reject(error) : resolve());
             server.closeAllConnections();
         });
+    }
+});
+
+test("protected routes verify the caller's bearer token", async () => {
+    const secret = "pep-test-secret";
+    const previousSecret = process.env.JWT_SECRET;
+    process.env.JWT_SECRET = secret;
+
+    const token = jwt.sign(
+        { username: "riddhi", role: "USER" },
+        secret,
+        { algorithm: "HS256" }
+    );
+    const app = express();
+    app.use("/api", protectedRoutes);
+
+    const server = http.createServer(app);
+    await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+
+    try {
+        const address = server.address();
+        const response = await fetch(`http://127.0.0.1:${address.port}/api/profile`, {
+            headers: { authorization: `Bearer ${token}` }
+        });
+
+        assert.equal(response.status, 200);
+        const body = await response.json();
+        assert.equal(body.user.username, "riddhi");
+        assert.equal(body.user.role, "USER");
+    } finally {
+        await new Promise((resolve, reject) => {
+            server.close(error => error ? reject(error) : resolve());
+            server.closeAllConnections();
+        });
+
+        if (previousSecret === undefined) {
+            delete process.env.JWT_SECRET;
+        } else {
+            process.env.JWT_SECRET = previousSecret;
+        }
     }
 });
 
