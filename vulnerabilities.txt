@@ -17,3 +17,17 @@ solved 29/9
 
 🟢 Low — Hardcoded credentials & plaintext secrets in the repo
 token.txt (git-ignored, but was in the zip you sent me) contains real signed JWTs. auth.js hardcodes two accounts with weak passwords directly in source. Fine for a scratch dev build, but worth flagging so it doesn't leak into a "real" version later.
+
+2026-09-29 22:55:20
+
+🔴 Critical — still exploitable: JWT secret was never rotated
+.env.example now shows a placeholder (good), but I checked .env — the file that actually signs your tokens — and it's still 6423FA396CC659F56EF79FC8706C12A9108E2A401A18D7E4D4CEE5561F50899E, the exact value that was exposed. I minted a fresh forged ADMIN token with that secret just now and it still got me into /api/admin. Worse: I checked git log -p -- .env.example and the real secret is sitting in commit 9db3788 in your history, permanently, even though the current file is clean. This needs two actions, not one: (1) generate a brand-new random secret and put it in .env (this immediately invalidates every token signed with the old one, forged or legitimate), and (2) if this repo is ever pushed anywhere shared, scrub the secret from history (git filter-repo or BFG) since git log still exposes it — simply committing a fix on top does not remove it.
+
+🟢 Fixed — Username enumeration timing leak
+auth.js now runs bcrypt.compare against a dummy hash when the user doesn't exist. My first timing pass showed a residual gap (~72ms vs ~19ms), but that turned out to be a one-time bcrypt native-module warm-up cost on the very first real compare — when I re-ran it interleaved (alternating real/fake usernames, 20 rounds each) the medians converged to ~1.2ms both ways. Confirmed fixed.
+
+🟢 Fixed — No rate limiting on login
+express-rate-limit is in front of /login now (10 requests / 15 min). I hit it hard and it kicked in correctly — in fact it was so effective it also caught my own repeated test traffic and locked out a legitimate login for the same reason. Worth knowing: it's IP-keyed, not username-keyed, so it protects against distributed brute-forcing per-account but means many real users behind the same NAT/office IP could collide. That's a reasonable tradeoff for a zero trust control, just flagging it as a UX/availability consideration, not a security gap.
+
+🟢 Fixed — Rate-limiter/resource-key evasion
+normalizeResource() lowercases and strips trailing slashes before both the PDP check and the rate-limit key. I retested with trailing slashes, mixed case, %41dmin encoding, and double slashes — all either got folded into the same rate-limit bucket correctly or were rejected by Express routing outright before reaching your code. No bypass found.

@@ -4,9 +4,12 @@
   "description": "",
   "main": "index.js",
   "scripts": {
+    "prestart": "node scripts/generate-jwt-secret.js",
     "start": "node src/server.js",
+    "predev": "node scripts/generate-jwt-secret.js",
     "dev": "nodemon src/server.js",
-    "test": "node --test"
+    "pretest": "node scripts/generate-jwt-secret.js",
+    "test": "node --require ./scripts/load-env.js --test"
   },
   "keywords": [],
   "author": "",

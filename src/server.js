@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("dotenv").config({ override: true, quiet: true });
 
 const express = require("express");
 const helmet = require("helmet");

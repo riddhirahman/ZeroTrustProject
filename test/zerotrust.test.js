@@ -204,11 +204,12 @@ test("unknown roles are denied by default", () => {
     assert.equal(decision.reason, "Unknown user role");
 });
 
-test("repeated denials create a stage-one rate limit", () => {
+test("repeated denials create a rate limit", () => {
     let now = 0;
     const monitor = createDenialMonitor({
         threshold: 3,
         windowMs: 5 * 60 * 1000,
+        cooldownMs: 15 * 60 * 1000,
         clock: () => now
     });
     const denial = {
@@ -235,13 +236,24 @@ test("repeated denials create a stage-one rate limit", () => {
             role: "USER",
             resource: "/api/admin"
         }),
-        { stage: 1, retryAfterSeconds: 300 }
+        { retryAfterSeconds: 900 }
     );
 });
 
-test("three denials after stage one escalate to a one-hour cooldown", () => {
+test("a later, independent round of denials gets the same treatment as the first", () => {
+    // Regression test: an earlier version of this monitor permanently
+    // flagged a subject after its first rate limit, so any later
+    // unrelated round of denials jumped straight to a harsher cooldown
+    // even long after the first one had fully expired. There should be
+    // no memory of a subject once its cooldown and denial window have
+    // both elapsed.
     let now = 0;
-    const monitor = createDenialMonitor({ clock: () => now });
+    const monitor = createDenialMonitor({
+        threshold: 3,
+        windowMs: 5 * 60 * 1000,
+        cooldownMs: 15 * 60 * 1000,
+        clock: () => now
+    });
     const denial = {
         user: "riddhi", role: "USER", action: "GET",
         resource: "/api/admin", decision: "DENY"
@@ -250,24 +262,36 @@ test("three denials after stage one escalate to a one-hour cooldown", () => {
     monitor.recordDecision(denial);
     monitor.recordDecision(denial);
     monitor.recordDecision(denial);
-    now += 5 * 60 * 1000;
+
+    // Well past both the cooldown and the denial window.
+    now += 20 * 60 * 1000;
+    monitor.cleanupExpiredEntries();
+    assert.equal(
+        monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
+        null
+    );
 
     assert.equal(monitor.recordDecision(denial), null);
     now += 1_000;
     assert.equal(monitor.recordDecision(denial), null);
     now += 1_000;
     const securityEvent = monitor.recordDecision(denial);
-    assert.equal(securityEvent.type, "RATE_LIMIT_ESCALATED");
-    assert.equal(securityEvent.deniedAttemptCount, 3);
+
+    assert.equal(securityEvent.type, "REPEATED_DENIAL");
     assert.deepEqual(
         monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
-        { stage: 2, retryAfterSeconds: 3600 }
+        { retryAfterSeconds: 900 }
     );
 });
 
-test("an allowed request after stage one resets the user", () => {
+test("an allowed request resets a subject's denial history", () => {
     let now = 0;
-    const monitor = createDenialMonitor({ clock: () => now });
+    const monitor = createDenialMonitor({
+        threshold: 3,
+        windowMs: 5 * 60 * 1000,
+        cooldownMs: 15 * 60 * 1000,
+        clock: () => now
+    });
     const denial = {
         user: "riddhi", role: "USER", action: "GET",
         resource: "/api/admin", decision: "DENY"
@@ -275,14 +299,52 @@ test("an allowed request after stage one resets the user", () => {
 
     monitor.recordDecision(denial);
     monitor.recordDecision(denial);
-    monitor.recordDecision(denial);
-    now += 5 * 60 * 1000;
+    now += 1_000;
     monitor.recordDecision({ ...denial, decision: "ALLOW" });
 
+    // The two prior denials should no longer count toward the threshold.
+    assert.equal(monitor.recordDecision(denial), null);
     assert.equal(
         monitor.getRateLimit({ user: "riddhi", role: "USER", resource: "/api/admin" }),
         null
     );
+});
+
+test("denial-tracking state does not persist once it has fully expired", () => {
+    // Guards against the unbounded-memory issue: a key that is denied
+    // once and never revisited should leave no trace after its window
+    // has elapsed and cleanup has run.
+    let now = 0;
+    const monitor = createDenialMonitor({
+        threshold: 3,
+        windowMs: 5 * 60 * 1000,
+        cooldownMs: 15 * 60 * 1000,
+        clock: () => now
+    });
+
+    for (let i = 0; i < 50; i += 1) {
+        monitor.recordDecision({
+            user: "riddhi",
+            role: "USER",
+            action: "GET",
+            resource: `/api/scan-${i}`,
+            decision: "DENY"
+        });
+    }
+
+    now += 10 * 60 * 1000;
+    monitor.cleanupExpiredEntries();
+
+    for (let i = 0; i < 50; i += 1) {
+        assert.equal(
+            monitor.getRateLimit({
+                user: "riddhi",
+                role: "USER",
+                resource: `/api/scan-${i}`
+            }),
+            null
+        );
+    }
 });
 
 test("allowed decisions do not create a security event", () => {

@@ -72,7 +72,6 @@ function pep(req, res, next) {
             return res.status(429).json({
                 decision: "RATE_LIMITED",
                 reason: "You are being rate limited due to repeated unauthorized requests. Please try again later.",
-                rateLimitStage: rateLimit.stage,
                 retryAfterSeconds: rateLimit.retryAfterSeconds
             });
         }

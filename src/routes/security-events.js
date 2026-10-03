@@ -39,14 +39,9 @@ router.get("/security/stats", pep, (req, res) => {
         event => event.type === "REPEATED_DENIAL"
     ).length;
 
-    const rateLimitEscalations = events.filter(
-        event => event.type === "RATE_LIMIT_ESCALATED"
-    ).length;
-
     return res.json({
         totalEvents: events.length,
-        repeatedDenials,
-        rateLimitEscalations
+        repeatedDenials
     });
 });
 
